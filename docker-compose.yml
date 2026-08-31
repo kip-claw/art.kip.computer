@@ -1,0 +1,12 @@
+services:
+  frame-art:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FRAME_ART_DATA_DIR: /data
+      FRAME_ART_TOKEN_FILE: /data/state/samsung-token
+    volumes:
+      - ${FRAME_ART_DATA_DIR:?Set FRAME_ART_DATA_DIR in .env}:/data
+    ports:
+      - "${FRAME_ART_BIND_ADDRESS:-127.0.0.1}:8033:8000"
