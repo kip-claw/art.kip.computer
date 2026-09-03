@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-from html import escape
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 from typing import Annotated
 
@@ -40,7 +40,9 @@ def create_app(
     def artwork_preview(identifier: str) -> FileResponse:
         """Serve a Frame-ready preview to the private curator."""
         try:
-            return FileResponse(catalogue.render_path(identifier), media_type="image/jpeg")
+            return FileResponse(
+                catalogue.render_path(identifier), media_type="image/jpeg"
+            )
         except KeyError as error:
             raise HTTPException(404, "Artwork not found.") from error
 
@@ -73,6 +75,32 @@ def create_app(
         except KeyError as error:
             raise HTTPException(404, "Artwork not found.") from error
         return {"status": "displayed"}
+
+    @app.post("/api/artworks/{identifier}/queue-display")
+    def queue_display(identifier: str, confirm: bool = False) -> dict[str, str]:
+        """Queue an already-uploaded work for a later reachable-TV display."""
+        _require_confirmation(confirm, "queue display")
+        try:
+            catalogue.set_pending_display(identifier)
+        except KeyError as error:
+            raise HTTPException(404, "Artwork not found.") from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        return {"status": "queued"}
+
+    @app.post("/api/pending-display/attempt")
+    def attempt_pending_display(confirm: bool = False) -> dict[str, str]:
+        """Attempt the one queued display; leave it queued if the TV is asleep."""
+        _require_confirmation(confirm, "pending display")
+        artwork = catalogue.pending_display()
+        if artwork is None:
+            return {"status": "nothing-pending"}
+        try:
+            make_client().display(artwork.tv_content_id or "")
+        except OSError as error:
+            return {"status": "pending", "detail": str(error)}
+        catalogue.mark_displayed(artwork.id)
+        return {"status": "displayed", "content_id": artwork.tv_content_id or ""}
 
     @app.post("/api/rollback")
     def rollback(confirm: bool = False) -> dict[str, str]:

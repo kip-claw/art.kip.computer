@@ -143,12 +143,41 @@ class Catalog:
             connection.execute(
                 """
                 UPDATE selection_state
-                SET previous_artwork_id = ?, current_artwork_id = ?, changed_at = ?
+                SET previous_artwork_id = ?, current_artwork_id = ?, changed_at = ?,
+                    pending_artwork_id = NULL, pending_at = NULL
                 WHERE id = 1
                 """,
                 (current, identifier, _now()),
             )
             self._log(connection, "displayed", identifier, artwork.tv_content_id)
+
+    def set_pending_display(self, identifier: str) -> None:
+        """Remember the uploaded artwork that should be shown when the TV returns."""
+        artwork = self.get(identifier)
+        if artwork.tv_content_id is None:
+            raise ValueError("Artwork has not been uploaded to the TV.")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE selection_state
+                SET pending_artwork_id = ?, pending_at = ?
+                WHERE id = 1
+                """,
+                (identifier, _now()),
+            )
+            self._log(connection, "display_pending", identifier, artwork.tv_content_id)
+
+    def pending_display(self) -> Artwork | None:
+        """Return the artwork queued for the next reachable-TV display attempt."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT artwork.* FROM selection_state
+                JOIN artwork ON artwork.id = selection_state.pending_artwork_id
+                WHERE selection_state.id = 1
+                """
+            ).fetchone()
+        return self._row_to_artwork(row) if row else None
 
     def rollback_target(self) -> Artwork | None:
         """Return the artwork that can restore the prior display."""
@@ -193,6 +222,18 @@ class Catalog:
                 INSERT OR IGNORE INTO selection_state (id) VALUES (1);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(selection_state)")
+            }
+            if "pending_artwork_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE selection_state ADD COLUMN pending_artwork_id TEXT"
+                )
+            if "pending_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE selection_state ADD COLUMN pending_at TEXT"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database)
